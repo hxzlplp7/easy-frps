@@ -32,19 +32,12 @@ echo -e "${BlueBG}                    交互式配置 + 自动保活            
 echo -e "${BlueBG}                                                                    ${Font}"
 echo ""
 
-# check frps
+# check frps - 如果已安装，直接进入管理菜单
 if [ -f "${FRP_PATH}/${FRP_NAME}" ]; then
-    echo -e "${Yellow}检测到已安装 frps，是否重新安装？${Font}"
-    echo -e "${Red}警告: 这将删除现有配置！${Font}"
-    printf "输入 y 继续，其他键退出: "
-    read confirm
-    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
-        echo -e "${Green}已取消安装${Font}"
-        exit 0
-    fi
-    # stop existing frps
-    pkill -x frps 2>/dev/null
-    rm -rf ${FRP_PATH}
+    echo -e "${Green}检测到已安装 frps，正在进入管理菜单...${Font}"
+    echo ""
+    exec ${FRP_PATH}/frps-manager.sh
+    exit 0
 fi
 
 # ==================== 交互式配置 ====================
