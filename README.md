@@ -78,6 +78,35 @@ frps log          # 实时日志
 frps info         # 显示连接信息
 ```
 
+### 快捷命令失效怎么办？
+
+如果输入 `frps` 提示 `command not found`，请尝试以下方法：
+
+**方法一：重新加载 Shell 配置**
+```bash
+# Linux (bash)
+source ~/.bashrc
+
+# FreeBSD (HostUno/Serv00)
+source ~/.profile
+```
+
+**方法二：重新运行安装脚本**
+```bash
+# 重新运行对应系统的安装脚本，会自动修复快捷命令
+./frps_linux_install.sh      # Linux
+./frps_freebsd_install.sh    # FreeBSD
+```
+
+**方法三：手动创建快捷命令**
+```bash
+# Linux
+echo 'alias frps="/usr/local/frp/frps_manager.sh"' >> ~/.bashrc && source ~/.bashrc
+
+# FreeBSD
+echo 'alias frps="$HOME/frp/frps_manager.sh"' >> ~/.profile && source ~/.profile
+```
+
 ### Linux 额外命令
 
 ```bash

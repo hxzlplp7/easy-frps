@@ -395,7 +395,98 @@ uninstall_frps() {
         echo -e "${Green}frps 已完全卸载${Font}"
         exit 0
     else
-        echo -e "${Yellow}已取消卸载${Font}"
+    echo -e "${Yellow}已取消卸载${Font}"
+    fi
+}
+
+fix_shortcut() {
+    echo -e "${Green}正在修复快捷方式...${Font}"
+    BIN_PATH="${HOME}/bin"
+    mkdir -p ${BIN_PATH}
+    
+    # 重新创建快捷命令
+    cat > ${BIN_PATH}/frps << CMDEOF
+#!/bin/sh
+exec ${FRP_PATH}/frps-manager.sh "\$@"
+CMDEOF
+    chmod +x ${BIN_PATH}/frps
+    
+    # 修复 PATH 配置
+    # .profile
+    if [ ! -f "${HOME}/.profile" ]; then
+        touch "${HOME}/.profile"
+    fi
+    if ! grep -q 'PATH.*\$HOME/bin' "${HOME}/.profile" 2>/dev/null; then
+        echo '' >> "${HOME}/.profile"
+        echo '# Added by frps installer' >> "${HOME}/.profile"
+        echo 'export PATH="$HOME/bin:$PATH"' >> "${HOME}/.profile"
+    fi
+    
+    # .shrc
+    if [ ! -f "${HOME}/.shrc" ]; then
+        touch "${HOME}/.shrc"
+    fi
+    if ! grep -q 'PATH.*\$HOME/bin' "${HOME}/.shrc" 2>/dev/null; then
+        echo '' >> "${HOME}/.shrc"
+        echo '# Added by frps installer' >> "${HOME}/.shrc"
+        echo 'export PATH="$HOME/bin:$PATH"' >> "${HOME}/.shrc"
+    fi
+    
+    # .cshrc
+    if [ ! -f "${HOME}/.cshrc" ]; then
+        touch "${HOME}/.cshrc"
+    fi
+    if ! grep -q 'set path.*\$HOME/bin' "${HOME}/.cshrc" 2>/dev/null; then
+        echo '' >> "${HOME}/.cshrc"
+        echo '# Added by frps installer' >> "${HOME}/.cshrc"
+        echo 'set path = ($HOME/bin $path)' >> "${HOME}/.cshrc"
+    fi
+    
+    echo -e "${Green}快捷方式已修复!${Font}"
+    echo ""
+    echo -e "${Yellow}请执行以下命令使其生效:${Font}"
+    echo -e "${Green}  tcsh/csh: ${Red}rehash${Font}"
+    echo -e "${Green}  bash/sh:  ${Red}source ~/.profile${Font}"
+    echo -e "${Green}  或重新登录 SSH${Font}"
+}
+
+update_script() {
+    echo -e "${Green}正在检查更新...${Font}"
+    SCRIPT_URL="https://raw.githubusercontent.com/hxzlplp7/easy-frps/main/frps_freebsd_install.sh"
+    PROXY_URL="https://ghfast.top/"
+    
+    # 检测网络环境
+    GOOGLE_HTTP_CODE=$(curl -o /dev/null --connect-timeout 5 --max-time 8 -s --head -w "%{http_code}" "https://www.google.com" 2>/dev/null)
+    
+    TMP_SCRIPT="/tmp/frps_install_new.sh"
+    
+    if [ "$GOOGLE_HTTP_CODE" = "200" ]; then
+        curl -sL -o ${TMP_SCRIPT} ${SCRIPT_URL}
+    else
+        curl -sL -o ${TMP_SCRIPT} ${PROXY_URL}${SCRIPT_URL}
+    fi
+    
+    if [ -f "${TMP_SCRIPT}" ] && [ -s "${TMP_SCRIPT}" ]; then
+        # 提取新脚本中的管理脚本部分并更新
+        echo -e "${Green}正在更新管理脚本...${Font}"
+        
+        # 从新安装脚本中提取管理脚本内容
+        sed -n "/^cat > \${FRP_PATH}\/frps-manager.sh << 'MANAGEREOF'/,/^MANAGEREOF$/p" ${TMP_SCRIPT} | \
+        sed '1d;$d' > ${FRP_PATH}/frps-manager.sh.new
+        
+        if [ -s "${FRP_PATH}/frps-manager.sh.new" ]; then
+            mv ${FRP_PATH}/frps-manager.sh.new ${FRP_PATH}/frps-manager.sh
+            chmod +x ${FRP_PATH}/frps-manager.sh
+            echo -e "${Green}管理脚本已更新到最新版本!${Font}"
+            echo -e "${Yellow}请重新运行 frps 命令以使用新版本${Font}"
+        else
+            echo -e "${Red}更新失败: 无法提取管理脚本${Font}"
+            rm -f ${FRP_PATH}/frps-manager.sh.new
+        fi
+        
+        rm -f ${TMP_SCRIPT}
+    else
+        echo -e "${Red}更新失败: 无法下载最新脚本${Font}"
     fi
 }
 
@@ -415,11 +506,15 @@ show_menu() {
     echo -e "${Green}6.${Font} 查看配置"
     echo -e "${Green}7.${Font} 编辑配置"
     echo -e "${Green}8.${Font} 连接信息"
+    echo -e "${Cyan}------------------ 维护选项 ------------------${Font}"
+    echo -e "${Blue}10.${Font} 修复快捷方式"
+    echo -e "${Blue}11.${Font} 更新脚本"
+    echo -e "${Cyan}----------------------------------------------${Font}"
     echo -e "${Red}9.${Font} 卸载 frps"
     echo -e "${Yellow}0.${Font} 退出"
     echo -e "${Cyan}==================================================${Font}"
     echo ""
-    printf "请输入选项 [0-9]: "
+    printf "请输入选项: "
 }
 
 # 直接执行命令模式
@@ -464,6 +559,8 @@ while true; do
         7) edit_config ;;
         8) show_info; printf "\n按回车继续..."; read dummy ;;
         9) uninstall_frps ;;
+        10) fix_shortcut; printf "\n按回车继续..."; read dummy ;;
+        11) update_script; printf "\n按回车继续..."; read dummy ;;
         0) echo -e "${Green}再见!${Font}"; exit 0 ;;
         *) echo -e "${Red}无效选项${Font}"; sleep 1 ;;
     esac
