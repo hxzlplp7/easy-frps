@@ -23,13 +23,13 @@
 ### Linux VPS/NAT机 安装
 
 ```bash
-# 一键安装
-wget https://raw.githubusercontent.com/hxzlplp7/easy-frps/main/frps_linux_install.sh && chmod +x frps_linux_install.sh && sudo ./frps_linux_install.sh
+# 一键安装 (请使用 root 用户运行)
+wget https://raw.githubusercontent.com/hxzlplp7/easy-frps/main/frps_linux_install.sh && bash frps_linux_install.sh
 ```
 
 或使用国内镜像：
 ```bash
-wget https://ghfast.top/https://raw.githubusercontent.com/hxzlplp7/easy-frps/main/frps_linux_install.sh && chmod +x frps_linux_install.sh && sudo ./frps_linux_install.sh
+wget https://ghfast.top/https://raw.githubusercontent.com/hxzlplp7/easy-frps/main/frps_linux_install.sh && bash frps_linux_install.sh
 ```
 
 ### FreeBSD (HostUno/Serv00) 安装
@@ -119,7 +119,7 @@ journalctl -u frps -f   # 查看日志
 
 ### Linux
 ```bash
-wget https://raw.githubusercontent.com/hxzlplp7/easy-frps/main/frps_linux_uninstall.sh && chmod +x frps_linux_uninstall.sh && sudo ./frps_linux_uninstall.sh
+wget https://raw.githubusercontent.com/hxzlplp7/easy-frps/main/frps_linux_uninstall.sh && bash frps_linux_uninstall.sh
 ```
 
 ### FreeBSD
