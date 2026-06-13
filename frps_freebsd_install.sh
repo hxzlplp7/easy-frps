@@ -492,6 +492,120 @@ uninstall_frps() {
     fi
 }
 
+setup_ssl() {
+    echo ""
+    echo -e "${Cyan}==================== 配置 SSL/TLS ====================${Font}"
+    
+    # 检测当前是否启用了 SSL
+    SSL_CERT=$(grep "transport.tls.certFile" ${FRP_PATH}/frps.toml | awk -F'=' '{print $2}' | tr -d ' "' 2>/dev/null)
+    
+    if [ -n "$SSL_CERT" ]; then
+        SSL_KEY=$(grep "transport.tls.keyFile" ${FRP_PATH}/frps.toml | awk -F'=' '{print $2}' | tr -d ' "' 2>/dev/null)
+        echo -e "${Green}当前状态: ${Font}SSL/TLS 已启用"
+        echo -e "${Green}证书路径: ${Font}${SSL_CERT}"
+        echo -e "${Green}密钥路径: ${Font}${SSL_KEY}"
+        echo ""
+        echo "请选择操作:"
+        echo "  1) 重新配置 SSL/TLS"
+        echo "  2) 关闭 SSL/TLS 加密"
+        echo "  0) 返回主菜单"
+        printf "请输入选项 [0-2]: "
+        read ssl_op
+        ssl_op=${ssl_op:-0}
+        
+        if [ "$ssl_op" = "0" ]; then
+            return
+        elif [ "$ssl_op" = "2" ]; then
+            # 清理旧的 SSL 字段
+            grep -v "transport.tls.certFile" ${FRP_PATH}/frps.toml | grep -v "transport.tls.keyFile" > ${FRP_PATH}/frps.toml.tmp
+            grep -v "SSL/TLS 加密配置" ${FRP_PATH}/frps.toml.tmp > ${FRP_PATH}/frps.toml
+            rm -f ${FRP_PATH}/frps.toml.tmp
+            echo -e "${Green}SSL/TLS 配置已清除${Font}"
+            echo -e "${Yellow}配置已修改，是否重启 frps? (y/n)${Font}"
+            read confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                restart_frps
+            fi
+            return
+        fi
+    fi
+
+    # 启用/重设 SSL
+    echo ""
+    echo -e "${Yellow}是否启用 SSL/TLS 加密功能 (配合 CDN 回源等场景)?${Font}"
+    printf "启用 SSL/TLS? (y/n) [默认 y]: "
+    read enable_ssl
+    enable_ssl=${enable_ssl:-y}
+    
+    if [ "$enable_ssl" = "y" ] || [ "$enable_ssl" = "Y" ]; then
+        echo ""
+        echo -e "${Yellow}请选择证书来源:${Font}"
+        echo "  1) 使用自签证书 (自动生成)"
+        echo "  2) 使用已有证书 (手动提供路径)"
+        printf "输入选项 [默认 1]: "
+        read ssl_type
+        ssl_type=${ssl_type:-1}
+        
+        if [ "$ssl_type" = "1" ]; then
+            SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s ip.sb 2>/dev/null || echo "frps")
+            printf "请输入自签证书的域名或公网IP [默认 ${SERVER_IP}]: "
+            read ssl_domain
+            ssl_domain=${ssl_domain:-${SERVER_IP}}
+            
+            # 校验 openssl
+            if ! command -v openssl >/dev/null 2>&1; then
+                echo -e "${Red}错误: 系统未安装 openssl，无法生成自签证书。${Font}"
+                return
+            fi
+            
+            CERT_FILE="${FRP_PATH}/cert.pem"
+            KEY_FILE="${FRP_PATH}/key.pem"
+            echo -e "${Green}正在生成自签证书...${Font}"
+            openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout "${KEY_FILE}" -out "${CERT_FILE}" -subj "/CN=${ssl_domain}" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo -e "${Green}自签证书生成成功!${Font}"
+            else
+                echo -e "${Red}错误: 自签证书生成失败，请检查 openssl 是否工作正常。${Font}"
+                return
+            fi
+        else
+            printf "请输入证书 cert.pem 的绝对路径: "
+            read CERT_FILE
+            while [ ! -f "$CERT_FILE" ]; do
+                echo -e "${Red}文件不存在: ${CERT_FILE}${Font}"
+                printf "请重新输入证书 cert.pem 的绝对路径: "
+                read CERT_FILE
+            done
+
+            printf "请输入密钥 key.pem 的绝对路径: "
+            read KEY_FILE
+            while [ ! -f "$KEY_FILE" ]; do
+                echo -e "${Red}文件不存在: ${KEY_FILE}${Font}"
+                printf "请重新输入密钥 key.pem 的绝对路径: "
+                read KEY_FILE
+            done
+        fi
+        
+        # 写入配置文件，先清理原有的
+        grep -v "transport.tls.certFile" ${FRP_PATH}/frps.toml | grep -v "transport.tls.keyFile" > ${FRP_PATH}/frps.toml.tmp
+        grep -v "SSL/TLS 加密配置" ${FRP_PATH}/frps.toml.tmp > ${FRP_PATH}/frps.toml
+        rm -f ${FRP_PATH}/frps.toml.tmp
+        
+        cat >> ${FRP_PATH}/frps.toml << EOF
+
+# SSL/TLS 加密配置
+transport.tls.certFile = "${CERT_FILE}"
+transport.tls.keyFile = "${KEY_FILE}"
+EOF
+        echo -e "${Green}SSL/TLS 配置写入成功!${Font}"
+        echo -e "${Yellow}配置已修改，是否重启 frps? (y/n)${Font}"
+        read confirm
+        if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+            restart_frps
+        fi
+    fi
+}
+
 fix_shortcut() {
     echo -e "${Green}正在修复快捷方式...${Font}"
     BIN_PATH="${HOME}/bin"
@@ -599,11 +713,12 @@ show_menu() {
     echo -e "${Green}6.${Font} 查看配置"
     echo -e "${Green}7.${Font} 编辑配置"
     echo -e "${Green}8.${Font} 连接信息"
+    echo -e "${Green}9.${Font} 配置 SSL/TLS"
     echo -e "${Cyan}------------------ 维护选项 ------------------${Font}"
     echo -e "${Blue}10.${Font} 修复快捷方式"
     echo -e "${Blue}11.${Font} 更新脚本"
     echo -e "${Cyan}----------------------------------------------${Font}"
-    echo -e "${Red}9.${Font} 卸载 frps"
+    echo -e "${Red}12.${Font} 卸载 frps"
     echo -e "${Yellow}0.${Font} 退出"
     echo -e "${Cyan}==================================================${Font}"
     echo ""
@@ -651,9 +766,10 @@ while true; do
         6) show_config; printf "\n按回车继续..."; read dummy ;;
         7) edit_config ;;
         8) show_info; printf "\n按回车继续..."; read dummy ;;
-        9) uninstall_frps ;;
+        9) setup_ssl; printf "\n按回车继续..."; read dummy ;;
         10) fix_shortcut; printf "\n按回车继续..."; read dummy ;;
         11) update_script; printf "\n按回车继续..."; read dummy ;;
+        12) uninstall_frps ;;
         0) echo -e "${Green}再见!${Font}"; exit 0 ;;
         *) echo -e "${Red}无效选项${Font}"; sleep 1 ;;
     esac
