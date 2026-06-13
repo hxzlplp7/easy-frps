@@ -72,6 +72,13 @@ install_deps() {
             $PKG_MANAGER install -y wget
         fi
     fi
+    if ! command -v openssl &> /dev/null; then
+        if [ "$PKG_MANAGER" = "apk" ]; then
+            apk add --no-cache openssl
+        else
+            $PKG_MANAGER install -y openssl
+        fi
+    fi
 }
 
 clear
@@ -175,6 +182,54 @@ echo -e "${Cyan}如果不需要 HTTPS 代理，直接回车跳过${Font}"
 printf "HTTPS 端口 [默认 443，留空跳过]: "
 read VHOST_HTTPS_PORT
 
+# SSL/TLS 加密配置 (可选)
+echo ""
+echo -e "${Yellow}是否启用 SSL/TLS 加密功能 (配合 CDN 回源等场景)?${Font}"
+printf "启用 SSL/TLS? (y/n) [默认 n]: "
+read ENABLE_SSL
+ENABLE_SSL=${ENABLE_SSL:-n}
+
+if [ "$ENABLE_SSL" = "y" ] || [ "$ENABLE_SSL" = "Y" ]; then
+    echo ""
+    echo -e "${Yellow}请选择证书来源:${Font}"
+    echo "  1) 使用自签证书 (自动生成)"
+    echo "  2) 使用已有证书 (手动提供路径)"
+    printf "输入选项 [默认 1]: "
+    read SSL_TYPE
+    SSL_TYPE=${SSL_TYPE:-1}
+
+    if [ "$SSL_TYPE" = "1" ]; then
+        echo ""
+        printf "请输入自签证书的域名或公网IP [默认 ${SERVER_IP}]: "
+        read SSL_DOMAIN
+        SSL_DOMAIN=${SSL_DOMAIN:-${SERVER_IP}}
+        
+        GENERATE_SELF_SIGNED="true"
+        CERT_FILE="${FRP_PATH}/cert.pem"
+        KEY_FILE="${FRP_PATH}/key.pem"
+    else
+        echo ""
+        printf "请输入证书 cert.pem 的绝对路径: "
+        read CERT_FILE
+        while [ ! -f "$CERT_FILE" ]; do
+            echo -e "${Red}文件不存在: ${CERT_FILE}${Font}"
+            printf "请重新输入证书 cert.pem 的绝对路径: "
+            read CERT_FILE
+        done
+
+        printf "请输入密钥 key.pem 的绝对路径: "
+        read KEY_FILE
+        while [ ! -f "$KEY_FILE" ]; do
+            echo -e "${Red}文件不存在: ${KEY_FILE}${Font}"
+            printf "请重新输入密钥 key.pem 的绝对路径: "
+            read KEY_FILE
+        done
+        GENERATE_SELF_SIGNED="false"
+    fi
+else
+    ENABLE_SSL="n"
+fi
+
 # ==================== 确认配置 ====================
 echo ""
 echo -e "${Cyan}==================== 配置确认 ====================${Font}"
@@ -193,6 +248,18 @@ if [ -n "$VHOST_HTTPS_PORT" ]; then
     echo -e "${Green}HTTPS 端口:       ${Font}${VHOST_HTTPS_PORT}"
 else
     echo -e "${Yellow}HTTPS 端口:       ${Font}未配置"
+fi
+if [ "$ENABLE_SSL" = "y" ] || [ "$ENABLE_SSL" = "Y" ]; then
+    echo -e "${Green}SSL/TLS 加密:     ${Font}已启用"
+    if [ "$GENERATE_SELF_SIGNED" = "true" ]; then
+        echo -e "${Green}证书类型:         ${Font}自签证书 (证书域名: ${SSL_DOMAIN})"
+    else
+        echo -e "${Green}证书类型:         ${Font}自定义证书"
+        echo -e "${Green}证书路径:         ${Font}${CERT_FILE}"
+        echo -e "${Green}密钥路径:         ${Font}${KEY_FILE}"
+    fi
+else
+    echo -e "${Green}SSL/TLS 加密:     ${Font}未启用"
 fi
 echo ""
 printf "确认以上配置? (y/n) [默认 y]: "
@@ -252,6 +319,20 @@ mkdir -p ${FRP_PATH}
 mv ${FILE_NAME}/${FRP_NAME} ${FRP_PATH}/
 chmod +x ${FRP_PATH}/${FRP_NAME}
 
+# 生成自签证书
+if [ "$ENABLE_SSL" = "y" ] || [ "$ENABLE_SSL" = "Y" ]; then
+    if [ "$GENERATE_SELF_SIGNED" = "true" ]; then
+        echo -e "${Green}生成自签证书中...${Font}"
+        openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -keyout "${KEY_FILE}" -out "${CERT_FILE}" -subj "/CN=${SSL_DOMAIN}" 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo -e "${Green}自签证书生成成功!${Font}"
+        else
+            echo -e "${Red}错误: 自签证书生成失败，请检查 openssl 是否工作正常。${Font}"
+            exit 1
+        fi
+    fi
+fi
+
 # ==================== 生成配置文件 ====================
 echo -e "${Green}生成配置文件...${Font}"
 
@@ -294,6 +375,16 @@ log.to = "${FRP_PATH}/frps.log"
 log.level = "info"
 log.maxDays = 3
 EOF
+
+# SSL/TLS 配置
+if [ "$ENABLE_SSL" = "y" ] || [ "$ENABLE_SSL" = "Y" ]; then
+    cat >> ${FRP_PATH}/frps.toml << EOF
+
+# SSL/TLS 加密配置
+transport.tls.certFile = "${CERT_FILE}"
+transport.tls.keyFile = "${KEY_FILE}"
+EOF
+fi
 
 # ==================== 创建 systemd 服务 ====================
 echo -e "${Green}创建 systemd 服务...${Font}"
@@ -439,12 +530,21 @@ show_info() {
     DASH_USER=$(grep "webServer.user" ${FRP_PATH}/frps.toml | awk -F'"' '{print $2}')
     DASH_PWD=$(grep "webServer.password" ${FRP_PATH}/frps.toml | awk -F'"' '{print $2}')
     TOKEN=$(grep "auth.token" ${FRP_PATH}/frps.toml | awk -F'"' '{print $2}')
+    SSL_CERT=$(grep "transport.tls.certFile" ${FRP_PATH}/frps.toml | awk -F'=' '{print $2}' | tr -d ' "' 2>/dev/null)
     
     echo ""
     echo -e "${Cyan}==================== 连接信息 ====================${Font}"
     echo -e "${Green}服务器地址:     ${Font}${SERVER_IP}"
     echo -e "${Green}服务端口:       ${Font}${BIND_PORT}"
     echo -e "${Green}Token:          ${Font}${TOKEN}"
+    if [ -n "$SSL_CERT" ]; then
+        SSL_KEY=$(grep "transport.tls.keyFile" ${FRP_PATH}/frps.toml | awk -F'=' '{print $2}' | tr -d ' "' 2>/dev/null)
+        echo -e "${Green}SSL/TLS 加密:   ${Font}已启用"
+        echo -e "${Green}证书路径:       ${Font}${SSL_CERT}"
+        echo -e "${Green}密钥路径:       ${Font}${SSL_KEY}"
+    else
+        echo -e "${Green}SSL/TLS 加密:   ${Font}未启用"
+    fi
     echo ""
     echo -e "${Blue}Dashboard 面板:${Font}"
     echo -e "${Green}访问地址:       ${Font}http://${SERVER_IP}:${DASH_PORT}"
@@ -610,6 +710,11 @@ echo -e "${Cyan}==================== 连接信息 ====================${Font}"
 echo -e "${Green}服务器地址:     ${Font}${SERVER_IP}"
 echo -e "${Green}服务端口:       ${Font}${BIND_PORT}"
 echo -e "${Green}Token:          ${Font}${AUTH_TOKEN}"
+if [ "$ENABLE_SSL" = "y" ] || [ "$ENABLE_SSL" = "Y" ]; then
+    echo -e "${Green}SSL/TLS 加密:   ${Font}已启用"
+    echo -e "${Green}证书路径:       ${Font}${CERT_FILE}"
+    echo -e "${Green}密钥路径:       ${Font}${KEY_FILE}"
+fi
 echo ""
 echo -e "${Blue}Dashboard 管理面板:${Font}"
 echo -e "${Green}访问地址:       ${Font}http://${SERVER_IP}:${DASHBOARD_PORT}"
